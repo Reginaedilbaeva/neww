@@ -483,7 +483,6 @@ float:right;cursor:pointer;margin-left:10px;opacity:.7;font-size:.9rem;
 ```
 <h1 class="hero-name">Эдильбаева<br>Регина Ренатовна</h1>
 <div class="hero-rule"><div class="hero-rule-line"></div><div class="hero-rule-dot"></div><div class="hero-rule-line"></div></div>
-<p class="hero-p">Безопасный и деликатный подход к изменениям без шаблонов — с вниманием к вам и вашей уникальности.</p>
 <div class="hero-actions">
   <button class="btn-primary" onclick="openBook()">Записаться на приём</button>
   <a href="#services" class="btn-ghost">Посмотреть услуги</a>
@@ -746,18 +745,18 @@ async function sbGetFast(table, query, fallback) {
   query = query || '';
   fallback = fallback !== undefined ? fallback : [];
   try {
-    var ctrl = new AbortController();
-    var tid = setTimeout(function(){ ctrl.abort(); }, 3000);
-    var r = await fetch(SB_URL+'/'+table+'?'+query, {headers: SBH, signal: ctrl.signal});
-    clearTimeout(tid);
-    if (!r.ok) return fallback;
-    var data = await r.json();
+    var fetchP = fetch(SB_URL+'/'+table+'?'+query, {headers: SBH})
+      .then(function(r){ return r.ok ? r.json() : Promise.resolve(fallback); })
+      .catch(function(){ return fallback; });
+    var timeoutP = new Promise(function(res){ setTimeout(function(){ res(fallback); }, 3000); });
+    var data = await Promise.race([fetchP, timeoutP]);
     return Array.isArray(data) ? data : fallback;
   } catch(e) {
-    console.warn('[sbGetFast] '+table+':', e.message);
+    console.warn('[sbGetFast]', table, e.message);
     return fallback;
   }
 }
+
 
 /* ── Supabase GET with fallback ── */
 async function sbGet(table, query, fallback) {
@@ -1039,13 +1038,13 @@ function baNext()  { if(baCar)   baCar.next();   }
    ЗАПИСЬ
 ════════════════════════════════════════════════════ */
 var bookState = {
-  step:1, svc:'', date:'', time:'',
+  step:1, svcs:[], date:'', time:'',
   cy: new Date().getFullYear(),
   cm: new Date().getMonth()
 };
 
 function openBook(svcId) {
-  bookState = {step:1, svc:String(svcId||''), date:'', time:'',
+  bookState = {step:1, svcs:svcId?[String(svcId)]:[], date:'', time:'',
     cy:new Date().getFullYear(), cm:new Date().getMonth()};
   var bd = document.getElementById('bookBd');
   var sh = document.getElementById('bookSheet');
@@ -1064,10 +1063,10 @@ function closeBook() {
 
 function renderBook() {
   var s = bookState;
-  var selSvc = null;
-  for (var i = 0; i < liveSvcs.length; i++) {
-    if (String(liveSvcs[i].id) === String(s.svc)) { selSvc = liveSvcs[i]; break; }
-  }
+  var selSvcs = liveSvcs.filter(function(sv){
+    return s.svcs.indexOf(String(sv.id)) !== -1;
+  });
+  var selSvc = selSvcs[0] || null; // для обратной совместимости
   var today = new Date(); today.setHours(0,0,0,0);
   var fd  = new Date(s.cy, s.cm, 1).getDay();
   var off = fd === 0 ? 6 : fd - 1;
@@ -1092,9 +1091,9 @@ function renderBook() {
         '<p class="b-opt-name">'+escHtml(sv.name)+'</p>'+
         '<span class="b-opt-price">'+escHtml(sv.price)+'</span></div>';
     }
-    content = '<p class="b-step-title">Выберите услугу</p>'+
+    content = '<p class="b-step-title">Выберите услуги</p><p style="font-size:.75rem;color:#8A7060;margin-bottom:12px;">Можно выбрать несколько</p>'+
       '<div class="b-opts" id="bOpts">'+opts+'</div>'+
-      '<div class="b-nav"><button class="b-btn-next" id="bNext1"'+(s.svc?'':' disabled')+'>Далее →</button></div>';
+      '<div class="b-nav"><button class="b-btn-next" id="bNext1"'+(s.svcs.length>0?'':' disabled')+'>Далее →</button></div>';
 
   } else if (s.step === 2) {
     var calDays = '';
@@ -1131,14 +1130,15 @@ function renderBook() {
     requestAnimationFrame(function(){ loadTimeSlots(s.date); });
 
   } else {
-    var waMsg = encodeURIComponent('Здравствуйте! Хочу записаться.\nУслуга: '+(selSvc?selSvc.name:'')+'\nДата: '+dateFmt+'\nВремя: '+s.time);
+    var svcNames = selSvcs.map(function(sv){return sv.name;}).join(', ');
+  var waMsg = encodeURIComponent('Здравствуйте! Хочу записаться.\nУслуга: '+svcNames+'\nДата: '+dateFmt+'\nВремя: '+s.time);
     content = '<div class="b-confirm">'+
       '<p class="b-confirm-title">Подтверждение</p>'+
       '<div class="b-summary">'+
-        '<div class="b-sum-row"><span>Услуга</span><span>'+(selSvc?escHtml(selSvc.name):'—')+'</span></div>'+
+        '<div class="b-sum-row"><span>Услуга</span><span>'+escHtml(selSvcs.map(function(sv){return sv.name;}).join(', ') || '—')+'</span></div>'+
         '<div class="b-sum-row"><span>Дата</span><span>'+escHtml(dateFmt)+'</span></div>'+
         '<div class="b-sum-row"><span>Время</span><span>'+escHtml(s.time)+'</span></div>'+
-        '<div class="b-sum-row"><span>Стоимость</span><span>'+(selSvc?escHtml(selSvc.price):'—')+'</span></div>'+
+        '<div class="b-sum-row"><span>Стоимость</span><span>'+escHtml(selSvcs.map(function(sv){return sv.price;}).join(' + ') || '—')+'</span></div>'+
       '</div>'+
       '<a href="https://wa.me/'+WA+'?text='+waMsg+'" target="_blank" class="tg-btn" id="waBtn">📲 Записаться через WhatsApp</a>'+
       '<p style="font-size:.72rem;color:#8A7060;text-align:center;margin-top:10px;">Также доступен MAX по этому номеру</p>'+
@@ -1242,7 +1242,13 @@ function genSlots(start, end) {
   return slots;
 }
 
-function setSvc(id)  { bookState.svc = String(id); renderBook(); }
+function setSvc(id) {
+  id = String(id);
+  var idx = bookState.svcs.indexOf(id);
+  if (idx === -1) bookState.svcs.push(id);
+  else bookState.svcs.splice(idx, 1);
+  renderBook();
+}
 function setDate(d)  { bookState.date = d; bookState.time = ''; renderBook(); }
 function setTime(t)  {
   if (!t) return;
@@ -1265,13 +1271,13 @@ function _initBookListeners() {
   body.addEventListener('click', function(e) {
     /* Услуги */
     var svcOpt = e.target.closest('[data-svcid]');
-    if (svcOpt) { bookState.svc = svcOpt.getAttribute('data-svcid'); renderBook(); return; }
+    if (svcOpt) { setSvc(svcOpt.getAttribute('data-svcid')); return; }
     /* Слоты */
     var tslot = e.target.closest('.b-tslot:not(.booked):not([disabled])');
     if (tslot) { setTime(tslot.getAttribute('data-time')); return; }
     /* Кнопки навигации */
     var id = e.target.id;
-    if (id==='bNext1' && !e.target.disabled && bookState.svc) { nextStep(); return; }
+    if (id==='bNext1' && !e.target.disabled && bookState.svcs.length>0) { nextStep(); return; }
     if (id==='bCalPrev') { prevMonth(); return; }
     if (id==='bCalNext') { nextMonth(); return; }
     var calDay = e.target.closest('.b-cal-d:not([disabled])');
@@ -1282,7 +1288,7 @@ function _initBookListeners() {
     /* WA кнопка */
     var waBtn = e.target.closest('#waBtn');
     if (waBtn) {
-      if (!bookState.time || !bookState.svc) {
+      if (!bookState.time || bookState.svcs.length === 0) {
         e.preventDefault();
         showDiag('Выберите услугу и время перед записью');
       }
